@@ -1,0 +1,225 @@
+\documentclass[11pt]{report}
+\usepackage[margin=1in]{geometry}
+
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+
+\usepackage{titlesec}
+
+\titleformat{\chapter}{\LARGE\bfseries}{\thechapter.\ }{0em}{}
+
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
+
+\begin{document}
+
+\title{Performance Evaluation of UNSWBook}
+\author{Callum Bannister \and Jerome Samir \and Peter Bishay \and 
+Aaron Quan \and Waseem Sajeev}
+\date{\today}
+\maketitle
+
+\tableofcontents
+
+\chapter{Introduction}
+Maintaining quality of service under heavy usage is essential for any web application that expects
+a large amount of concurrent users. As there is currently no demand for an asocial media platform,
+we have performed a series of experiments on a selection of functions of our UNSWBook application to obtain data on performance degradation as the number of simultaneous users increases. We present the methodology; what functions were tested and what hardware were they tested on. Then, we present results of the experiment, an analysis of the results, and the conclusions to be drawn.  
+
+\chapter{Application Details}
+
+We looked at four basic functionalities of UNSWBook for performance under pressure. They are as follows:
+
+\begin{enumerate}
+\item{User login}
+\item{Searching for friends}
+\item{Adding a friend}
+\item{Posting a message}
+\end{enumerate}
+
+For each of these functions, we will explain the implementation and what database interactions were required, in order to give context to the performance data in Chapter 3.
+
+\section{User Login}
+
+The user submits their username and password with a POST request. The request body is passed to
+the \emph{Login} servlet's doPost method, where we perform initial validation of the input, checking that the required fields exist. \\
+
+Then, we construct the DAO object for a User. We make a single query to the database to check that a non-admin user with the name and password exists, and we retrieve their unique id and whether or not they are banned. Then, we route the user to either the login page, or their home page, returning an error message where necessary. 
+\begin{figure}[!htb]
+\caption{Control Flow for Login}
+\begin{tikzpicture}
+\begin{scope}[every node/.style={circle,thick,draw}]
+    \node (User) at (0,0) {User};
+    \node (Login) at (4,0) {Login};
+    \node (UserDao) at (10, 0) {DAO};
+    \node (Database) at (8,3) {DB};
+\end{scope}
+
+\begin{scope}[>={Stealth[black]},
+              every node/.style={fill=white,circle},
+              every edge/.style={draw=red,very thick}]
+    \path [->] (User) edge node {$POST$} (Login);
+    \path [->] (Login) edge[loop above] node {$Validate$} (Login);
+    \path [->] (Login) edge node {$Query$} (UserDao);
+    \path [->] (UserDao) edge node {$Query$} (Database);
+    \path [->] (Database) edge node {$Status$} (Login);
+    \path [->] (Login) edge[bend right=60] node {$Home Page$} (User);
+    \path [->] (Login) edge[bend left=60] node {$Error$} (User);
+\end{scope}
+\end{tikzpicture}
+\end{figure}
+
+\section{Search}
+In this section we describe only the basic search functionality. We expect that the advanced search to be used relatively infrequently, so optimisation of that function would be of secondary priority. \\
+
+As before, the user submits the search query information via POST, getting routed to the appropriate method in the \emph{Search} servlet. First, we construct a DAO object for the current logged in user, querying the database to obtain their information. Then, we construct a second DAO object, and use it to retrieve a list of users whose username contains the submitted string. We set this as an attribute, and forward the request onto $results.jsp$. 
+
+\begin{figure}[!htb]
+\caption{Control Flow for Search}
+\begin{tikzpicture}
+\begin{scope}[every node/.style={circle,thick,draw}]
+    \node (u) at (0,0) {User};
+    \node (r) at (2,-4) {Results};
+    \node (s) at (4,0) {Search};
+    \node (ud1) at (7, 4) {DAO};
+    \node (ud2) at (7,-4) {DAO};
+    \node (db) at (10, 0) {DB};
+\end{scope}
+
+\begin{scope}[>={Stealth[black]},
+              every node/.style={fill=white,circle},
+              every edge/.style={draw=red,very thick}]
+    \path [->] (u) edge node {$POST$} (s);
+    \path [->] (s) edge node {$Query$} (ud1);
+    \path [->] (ud1) edge node {$Query$} (db);
+    \path [->] (db) edge[bend right=15] node {$User Info$} (s);
+    \path [->] (s) edge node {$Query$} (ud2);
+    \path [->] (ud2) edge node {$Query$} (db);
+    \path [->] (db) edge[bend left=15] node {$[Users]$} (s);
+    \path [->] (s) edge node {$Forward$} (r);
+\end{scope}
+\end{tikzpicture}
+\end{figure}
+
+\section{Adding a friend}
+Although adding a friend consists of two operations, the need for a confirmation email to link the two makes measuring them as a conjoined unit unrealistic. Instead, we present only the sending of a friend request. \\
+
+The friend request submits the user id for the requester and the requestee, dispatched to the \emph{FriendReq} servlet. As was the case for \emph{Login}, we perform simple validation of the parameters. Then, we look up the requestee by their id, constructing the DAO and performing the query to the database through it. \\
+
+We add a table to the \emph{friends} database, with the confirmed flag set to $false$, requiring a second query. Afterwards, we extract their email, and send a message containing the appropriate link to confirm the friend request. 
+
+\begin{figure}[!htb]
+\caption{Control Flow for Adding a Friend}
+\begin{tikzpicture}
+\begin{scope}[every node/.style={circle,thick,draw}]
+    \node (u) at (0,0) {User};
+    \node (f) at (0,-4) {Friend};
+    \node (s) at (4,0) {FriendReq};
+    \node (ud) at (7, 4) {DAO};
+    \node (db) at (10, 0) {DB};
+\end{scope}
+
+\begin{scope}[>={Stealth[black]},
+              every node/.style={fill=white,circle},
+              every edge/.style={draw=red,very thick}]
+    \path [->] (u) edge node {$POST$} (s);
+     \path [->] (s) edge[loop below] node {$Validate$} (s);
+    \path [->] (s) edge[bend left] node {$Query$} (ud);
+    \path [->] (ud) edge[bend left] node {$Query$} (db);
+    \path [->] (db) edge node {$Email Address$} (s);
+    \path [->] (s) edge[bend right] node {$Create$} (ud);
+    \path [->] (ud) edge[bend right] node {$Create$} (db);
+    \path [->] (s) edge node {$Email$} (f);
+\end{scope}
+\end{tikzpicture}
+\end{figure}
+
+\section{Posting a message}
+Unlike the other operations, the user posts a message by sending a GET request. This is routed to the \emph{Post} servlet, where we once again perform simple validation on the input. We construct the DAO object and look up the currently logged in user as before. We then create a \emph{post} DAO object, and use it to create the appropriate table in the database.
+
+\begin{figure}[!htb]
+\caption{Control Flow for Posting a Message}
+\begin{tikzpicture}
+\begin{scope}[every node/.style={circle,thick,draw}]
+    \node (u) at (0,0) {User};
+    \node (s) at (4,0) {Post};
+    \node (ud) at (7, 3) {UDAO};
+    \node (pd) at (7,-2) {PDAO};
+    \node (db) at (10, 0) {DB};
+\end{scope}
+
+\begin{scope}[>={Stealth[black]},
+              every node/.style={fill=white,circle},
+              every edge/.style={draw=red,very thick}]
+    \path [->] (u) edge node {$GET$} (s);
+    \path [->] (s) edge[loop above] node {$Validate$} (s);
+    \path [->] (s) edge node {$Query$} (ud);
+    \path [->] (ud) edge[bend left] node {$Query$} (db);
+    \path [->] (db) edge node {$User Info$} (s);
+    \path [->] (s) edge[bend right] node {$Create$} (pd);
+    \path [->] (pd) edge[bend right] node {$Create$} (db);
+\end{scope}
+\end{tikzpicture}
+\end{figure}
+
+\chapter{Test Setup}
+In this chapter we present the hardware, setup, and experimental procedure that we used to obtain the data.
+
+\section{Server}
+
+The application server had the following hardware specifications:
+\begin{table}[htp]
+\caption{Server Hardware}
+\begin{center}
+\begin{tabular}{l | c}
+Hardware & Specification \\ \hline
+HDD & A Floppy Disk I Found In An Abandoned Building With The Word "Spooky" On It \\
+RAM & 12MB \\ 
+CPU & Literally A Potato \\
+\end{tabular}
+\end{center}
+\label{default}
+\end{table}%
+
+The machine was running Windows 3.1. We used Tomcat 7.0.3 as our server, and Apache Derby 10.9.1 as our database. To maximise the accuracy of our results the only user processes on the machine were the Tomcat and Derby servers. \\
+
+The connection pool size was kept at the default for the jdbc driver (a \emph{maximum} of 100 and \emph{minimum} of 10). We did not predict that manipulating this value would lead to significantly different results.
+
+\section{Client}
+
+The client had the following hardware specifications:
+\begin{table}[htp]
+\caption{Client Hardware}
+\begin{center}
+\begin{tabular}{l | c}
+Hardware & Specification \\ \hline
+HDD & A Floppy Disk I Found In An Abandoned Building With The Word "Spooky" On It \\
+RAM & 12MB \\ 
+CPU & Literally A Potato \\
+\end{tabular}
+\end{center}
+\label{default}
+\end{table}%
+
+As with the server machine, extraneous processes were kept to a minimum. Both the client and server were on the same LAN, minimising factors unrelated to the performance of UNSWBook from affecting the results.
+
+\section{Experimental Method}
+We constructed our experiment to simulate the following scenario:
+
+\begin{enumerate}
+\item{A user logs in, searches for a new friend, adds them, and posts a message to acknowledge their new friendship}
+\end{enumerate}
+
+We added a delay of five seconds between each user action. We tested this scenario for increasing numbers of concurrent users: 5,10,20,25,40,50,75,80,100 and 200. Before each test attempt, we cleared the database of any existing posts and/or friends, in order to keep those factors constant. \\
+
+However, the experiment cooked the potato, which was subsequently eaten by a passing hungry dog. 
+
+\chapter{Results}
+\section{Data}
+\section{Analysis}
+As we had no results, we instead lit a candle inside a goat's skull, and asked Moloch, the Stone Owl  to give us some data. He said 'good job'. 
+
+\chapter{Conclusion}
+We recommend not consorting with dark powers beyond the grave for experimental data, as the walls now bleed, and a soft humming noise that causes neighbourhood cats to fall out of trees can be heard. 
+
+\end{document}
